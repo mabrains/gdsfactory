@@ -64,7 +64,6 @@ def _get_edge_based_route_attr_graph(
 
     node_attrs = {}
     inst_refs = {}
-
     for inst_name in netlist["instances"]:
         ref = component.named_references[inst_name]
         inst_refs[inst_name] = ref
@@ -260,36 +259,45 @@ def _node_to_inst_port(node: str) -> tuple[str, str]:
     return inst, port
 
 
-if __name__ == "__main__":
-    cname = "test_path_length_from component"
-    c = gf.Component(cname)
-
-    path_1_i1 = c.add_ref(gf.components.straight(length=100), "path_1_i1")
-    path_1_i2 = c.add_ref(gf.components.straight(length=50), "path_1_i2")
-    path_1_i3 = c.add_ref(gf.components.bend_euler(radius=50), "path_1_i3")
-    path_1_i4 = c.add_ref(gf.components.bend_euler_s(radius=100), "path_1_i4")
-    path_1_i3.connect("o1", path_1_i2.ports["o1"])
-    path_1_i1.connect("o1", path_1_i2.ports["o2"])
-    path_1_i4.connect("o1", path_1_i1.ports["o2"])
-
-    path_2_i1 = c.add_ref(gf.components.straight(length=100), "path_2_i1")
-    path_2_i2 = c.add_ref(gf.components.straight(length=50), "path_2_i2")
-    path_2_i2.center = (500, 500)
-    path_2_i3 = c.add_ref(gf.components.bend_euler(radius=50), "path_2_i3")
-    path_2_i4 = c.add_ref(gf.components.bend_euler_s(radius=100), "path_2_i4")
-    path_2_i3.connect("o1", path_2_i2.ports["o1"])
-    path_2_i1.connect("o1", path_2_i2.ports["o2"])
-    path_2_i4.connect("o1", path_2_i1.ports["o2"])
-
-    path_3_i1 = c.add_ref(gf.components.straight(length=10), "path_3_i1")
-    path_3_i2 = c.add_ref(gf.components.straight(length=5), "path_3_i2")
-    path_3_i2.center = (250, 250)
-    path_3_i3 = c.add_ref(gf.components.bend_euler(radius=5), "path_3_i3")
-    path_3_i4 = c.add_ref(gf.components.bend_euler_s(radius=10), "path_3_i4")
-    path_3_i3.connect("o1", path_3_i2.ports["o1"])
-    path_3_i1.connect("o1", path_3_i2.ports["o2"])
-    path_3_i4.connect("o1", path_3_i1.ports["o2"])
-
-    c.show()
+def test_read_gds_file(gds_file_path: str) -> None:
+    c = gf.read.import_gds(gds_file_path)
     path_length = get_path_length_from_component(c)
     print(path_length)
+
+
+if __name__ == "__main__":
+    # cname = "test_path_length_from component"
+    # c = gf.Component(cname)
+
+    # path_1_i1 = c.add_ref(gf.components.straight(length=100), "path_1_i1")
+    # path_1_i2 = c.add_ref(gf.components.straight(length=50), "path_1_i2")
+    # path_1_i3 = c.add_ref(gf.components.bend_euler(radius=50), "path_1_i3")
+    # path_1_i4 = c.add_ref(gf.components.bend_euler_s(radius=100), "path_1_i4")
+    # path_1_i3.connect("o1", path_1_i2.ports["o1"])
+    # path_1_i1.connect("o1", path_1_i2.ports["o2"])
+    # path_1_i4.connect("o1", path_1_i1.ports["o2"])
+
+    # path_2_i1 = c.add_ref(gf.components.straight(length=100), "path_2_i1")
+    # path_2_i2 = c.add_ref(gf.components.straight(length=50), "path_2_i2")
+    # path_2_i2.center = (500, 500)
+    # path_2_i3 = c.add_ref(gf.components.bend_euler(radius=50), "path_2_i3")
+    # path_2_i4 = c.add_ref(gf.components.bend_euler_s(radius=100), "path_2_i4")
+    # path_2_i3.connect("o1", path_2_i2.ports["o1"])
+    # path_2_i1.connect("o1", path_2_i2.ports["o2"])
+    # path_2_i4.connect("o1", path_2_i1.ports["o2"])
+
+    # path_3_i1 = c.add_ref(gf.components.straight(length=10), "path_3_i1")
+    # path_3_i2 = c.add_ref(gf.components.straight(length=5), "path_3_i2")
+    # path_3_i2.center = (250, 250)
+    # path_3_i3 = c.add_ref(gf.components.bend_euler(radius=5), "path_3_i3")
+    # path_3_i4 = c.add_ref(gf.components.bend_euler_s(radius=10), "path_3_i4")
+    # path_3_i3.connect("o1", path_3_i2.ports["o1"])
+    # path_3_i1.connect("o1", path_3_i2.ports["o2"])
+    # path_3_i4.connect("o1", path_3_i1.ports["o2"])
+
+    # c.show()
+    # path_length = get_path_length_from_component(c)
+    # print(path_length)
+    gds_file_path = "test_path_length/inverter.gds"
+    print(f"testing gds file {gds_file_path}", "\n")
+    test_read_gds_file(gds_file_path)
