@@ -1,4 +1,7 @@
+import logging
+import os
 import warnings
+from datetime import datetime
 from typing import Any
 
 import networkx as nx
@@ -24,8 +27,17 @@ def get_path_length_from_component(
         Path_length: list of tuples containis (start_port , end_port, path_length)
     for each path in component.
     """
-    pathlength_graph = get_edge_based_route_attr_graph(component)
-    path_length = get_paths(pathlength_graph)
+    try:
+        pathlength_graph = get_edge_based_route_attr_graph(component)
+    except Exception as e:
+        logging.error(f"failed to extract graph, error message {e}")
+        exit(1)
+    try:
+        path_length = get_paths(pathlength_graph)
+    except Exception as e:
+        logging.error(f"failed to get component paths, error message : {e}")
+        exit(1)
+
     return path_length
 
 
@@ -41,27 +53,38 @@ def get_edge_based_route_attr_graph(pic: Component) -> nx.Graph:
     """
     from gdsfactory.get_netlist import get_netlist_recursive
 
-    netlists = get_netlist_recursive(pic)
+    try:
+        netlists = get_netlist_recursive(pic)
+    except Exception:
+        logging.error("failed to get netlist")
+    for netlist_name, netlist in netlists.items():
+        logging.info(f"netlist_name : {netlist_name} \n netlist : {netlist}")
     netlist = netlists[pic.name]
     # print(netlist)
-    return _get_edge_based_route_attr_graph(
-        pic,
-        netlist=netlist,
-        netlists=netlists,
-    )
+    try:
+        return _get_edge_based_route_attr_graph(
+            pic,
+            netlist=netlist,
+            netlists=netlists,
+        )
+    except Exception:
+        logging.error("failed to get graph from netlist")
 
 
-@validate_call
-def _get_edge_based_route_attr_graph(
+def add_netlist_to_graph(
     component: Component,
-    netlist: dict[str, Any],
-    netlists: dict[str, dict[str, Any]],
-) -> nx.Graph:
+    netlist: Any,
+) -> tuple[nx.Graph, dict, dict, dict]:
+    """
+    Add netlist components to graph ports as nodes with route attributes.
+    """
     connections = netlist["connections"]
-    top_level_ports = netlist["ports"]
+    logging.info(f"netlist : \n {netlist} \n")
+    logging.info(f"connections : \n {connections} \n")
+    logging.info(f" netlist['instances'] : \n { netlist['instances']} \n")
+
     g = nx.Graph()
     inst_route_attrs = {}
-
     node_attrs = {}
     inst_refs = {}
     for inst_name in netlist["instances"]:
@@ -84,7 +107,40 @@ def _get_edge_based_route_attr_graph(
             node_attrs[pname] = n_attrs
             g.add_node(pname, **n_attrs)
 
+    logging.info(f"inst_route_attrs : \n {inst_route_attrs} \n")
     g.add_edges_from(connections.items(), weight=0.0001)
+    return g, inst_route_attrs, inst_refs, node_attrs
+
+
+def connect_top_level_ports(
+    g: nx.Graph, top_level_ports: dict, node_attrs: dict
+) -> nx.Graph:
+    edges = []
+    for port, sub_port in top_level_ports.items():
+        p_attrs = dict(node_attrs[sub_port])
+        e_attrs = {"weight": 0.0001}
+        edge = [port, sub_port, e_attrs]
+        edges.append(edge)
+        g.add_node(port, **p_attrs)
+    g.add_edges_from(edges)
+    return g
+
+
+@validate_call
+def _get_edge_based_route_attr_graph(
+    component: Component,
+    netlist: dict[str, Any],
+    netlists: dict[str, dict[str, Any]],
+) -> nx.Graph:
+    top_level_ports = netlist["ports"]
+    try:
+        g, inst_route_attrs, inst_refs, node_attrs = add_netlist_to_graph(
+            component, netlist
+        )
+    except Exception as e:
+        logging.error("failed to add netlist to graph")
+        logging.error(f"error : \n {(str(e))}")
+        exit(1)
 
     # connect all internal ports for devices with connectivity defined
     # currently we only do this for routing components, but could do it more generally in the future
@@ -102,55 +158,61 @@ def _get_edge_based_route_attr_graph(
                 g.add_edge(inst_in, inst_out, **attrs)
         else:
             sub_inst = inst_refs[inst_name]
+            logging.info(f"sub_inst : {sub_inst}, netllist name {sub_inst.parent.name}")
             if sub_inst.parent.name in netlists:
                 sub_netlist = netlists[sub_inst.parent.name]
-                sub_graph = _get_edge_based_route_attr_graph(
-                    sub_inst.parent,
-                    netlist=sub_netlist,
-                    netlists=netlists,
-                )
-                sub_nodes = []
-                sub_edges = []
-                for edge in sub_graph.edges(data=True):
-                    s, e, d = edge
-                    new_edge = []
-                    for node_name in [s, e]:
-                        new_node_name = _get_subinst_node_name(node_name, inst_name)
-                        new_edge.append(new_node_name)
-                    new_edge.append(d)
-                    sub_edges.append(new_edge)
-                for node in sub_graph.nodes(data=True):
-                    n, d = node
-                    new_name = _get_subinst_node_name(n, inst_name)
-                    x = d["x"]
-                    y = d["y"]
-                    new_pt = sub_inst._transform_point(
-                        np.array([x, y]),
-                        sub_inst.origin,
-                        sub_inst.rotation,
-                        sub_inst.x_reflection,
+                try:
+                    sub_graph = _get_edge_based_route_attr_graph(
+                        sub_inst.parent,
+                        netlist=sub_netlist,
+                        netlists=netlists,
                     )
-                    d["x"] = new_pt[0]
-                    d["y"] = new_pt[1]
-                    new_node = (new_name, d)
-                    sub_nodes.append(new_node)
-                g.add_nodes_from(sub_nodes)
-                g.add_edges_from(sub_edges)
+                except Exception as e:
+                    logging.error(
+                        f" error in recursive loop, \n sub_inst :  {sub_inst} , \n sub_netlist {sub_netlist} "
+                    )
+                    logging.error(f"error message {e}")
+                else:
+                    sub_nodes = []
+                    sub_edges = []
+                    for edge in sub_graph.edges(data=True):
+                        s, e, d = edge
+                        new_edge = []
+                        for node_name in [s, e]:
+                            new_node_name = _get_subinst_node_name(node_name, inst_name)
+                            new_edge.append(new_node_name)
+                        new_edge.append(d)
+                        sub_edges.append(new_edge)
+                    for node in sub_graph.nodes(data=True):
+                        n, d = node
+                        new_name = _get_subinst_node_name(n, inst_name)
+                        x = d["x"]
+                        y = d["y"]
+                        new_pt = sub_inst._transform_point(
+                            np.array([x, y]),
+                            sub_inst.origin,
+                            sub_inst.rotation,
+                            sub_inst.x_reflection,
+                        )
+                        d["x"] = new_pt[0]
+                        d["y"] = new_pt[1]
+                        new_node = (new_name, d)
+                        sub_nodes.append(new_node)
+                    g.add_nodes_from(sub_nodes)
+                    g.add_edges_from(sub_edges)
             else:
                 warnings.warn(
                     f"ignoring any links in {inst_name} ({sub_inst.parent.name})"
                 )
 
     # connect all top level ports
+    logging.info(f"top level ports : {top_level_ports}")
     if top_level_ports:
-        edges = []
-        for port, sub_port in top_level_ports.items():
-            p_attrs = dict(node_attrs[sub_port])
-            e_attrs = {"weight": 0.0001}
-            edge = [port, sub_port, e_attrs]
-            edges.append(edge)
-            g.add_node(port, **p_attrs)
-        g.add_edges_from(edges)
+        try:
+            connect_top_level_ports(g, top_level_ports, node_attrs)
+        except Exception:
+            logging.error("failed to connect top level ports")
+            exit(1)
     return g
 
 
@@ -260,12 +322,17 @@ def _node_to_inst_port(node: str) -> tuple[str, str]:
 
 
 def test_read_gds_file(gds_file_path: str) -> None:
-    c = gf.read.import_gds(gds_file_path)
+    try:
+        c = gf.read.import_gds(gds_file_path)
+    except FileNotFoundError:
+        logging.error(f"cannot find gds file, path : {gds_file_path}")
+        exit(1)
     path_length = get_path_length_from_component(c)
-    print(path_length)
+    c.show()
+    logging.info(f"{gds_file_path} file path_lengths : \n {path_length}")
 
 
-if __name__ == "__main__":
+def test_gds_component() -> None:
     cname = "test_path_length_from component"
     c = gf.Component(cname)
 
@@ -297,7 +364,28 @@ if __name__ == "__main__":
 
     c.show()
     path_length = get_path_length_from_component(c)
-    print(path_length)
+    logging.info(f"{cname} path_lengths : \n {path_length}")
+
+
+def main() -> None:
     # gds_file_path = "test_path_length/inverter.gds"
-    # print(f"testing gds file {gds_file_path}", "\n")
     # test_read_gds_file(gds_file_path)
+    test_gds_component()
+
+
+if __name__ == "__main__":
+    if not os.path.exists("logs/path_length_from_component/"):
+        os.mkdir("logs/path_length_from_component/")
+
+    now_str = datetime.utcnow().strftime("path_length_from_component_%Y_%m_%d_%H_%M_%S")
+    logging.basicConfig(
+        level=logging.DEBUG,
+        handlers=[
+            logging.FileHandler(f"logs/path_length_from_component/{now_str}.log"),
+            logging.StreamHandler(),
+        ],
+        format="%(asctime)s | %(levelname)-7s | %(message)s",
+        datefmt="%d-%b-%Y %H:%M:%S",
+    )
+    logging.getLogger()
+    main()
